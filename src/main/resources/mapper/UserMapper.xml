@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.xk.chatBack.mapper.UserMapper">
+    
+    <select id="getUserList" resultType="cn.xk.chatBack.model.User">
+        SELECT u.user_id, u.user_name, u.avatar, u.role, u.status, u.tag, u.create_time
+        FROM `user_map` um LEFT JOIN `user` u on um.friend_id = u.user_id
+        where um.user_id = #{userId}
+    </select>
+
+    
+    <select id="selectUserRelationship" resultType="cn.xk.chatBack.model.UserRelationship">
+        SELECT *
+        FROM `user_map`
+        where user_id = #{userId} and friend_id = #{friendId}
+    </select>
+    
+    <insert id="addFriend">
+        INSERT INTO `user_map` (`user_id`, `friend_id`)
+        VALUES (#{userId}, #{friendId}),
+               (#{friendId}, #{userId})
+    </insert>
+    
+    <insert id="joinGroup">
+        INSERT INTO `group_map` (`group_id`, `user_id`)
+        VALUES (#{groupId}, #{userId})
+    </insert>
+    
+    <select id="friendExist" resultType="java.lang.Integer">
+        SELECT count(*)
+        FROM `user_map`
+        WHERE (user_id = #{userId} and friend_id = #{friendId})
+            OR (user_id = #{friendId} and friend_id = #{userId})
+    </select>
+    
+    <delete id="exitFriend">
+        DELETE
+        FROM `user_map`
+        WHERE (user_id = #{userId} and friend_id = #{friendId})
+           OR (user_id = #{friendId} and friend_id = #{userId})
+    </delete>
+    
+    <select id="getFriendIdList" resultType="java.lang.String">
+        SELECT friend_id
+        FROM `user_map`
+        where user_id = #{userId}
+    </select>
+    
+</mapper>
