@@ -29,7 +29,9 @@
 - 图片集群间传递
 ### 项目原理
 #### 发送消息原理图
-<img src="./assets/send.png" style="max-width:800px">
+<img src="./assets/send.png" style="max-width:800px" />
+
+图片详细https://www.processon.com/v/65100371efc2276ceeba7e6f<br>
     
 
 #### ACK
