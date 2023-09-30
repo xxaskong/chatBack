@@ -7,6 +7,7 @@ import cn.xk.chatBack.service.GroupMessageService;
 import cn.xk.chatBack.service.GroupService;
 import cn.xk.chatBack.service.UserMessageService;
 import cn.xk.chatBack.service.UserService;
+import cn.xk.chatBack.utils.SocketIoConnectionPool;
 import cn.xk.chatBack.utils.jwt.JwtUtil;
 import com.alibaba.fastjson.JSON;
 import com.corundumstudio.socketio.BroadcastOperations;
@@ -18,6 +19,7 @@ import com.corundumstudio.socketio.annotation.OnEvent;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.map.IMap;
 import io.jsonwebtoken.Claims;
+import io.socket.emitter.Emitter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -68,6 +70,9 @@ public class ConnectionHandler {
     @Autowired
     private HazelcastInstance hazelcastInstance;
 
+    @Autowired
+    private SocketIoConnectionPool socketIoConnectionPool;
+
 
 
     /**
@@ -92,6 +97,18 @@ public class ConnectionHandler {
 //        }
         //存储SocketIOClient
         String id = client.getHandshakeData().getSingleUrlParam("id");
+        String connectType = client.getHandshakeData().getSingleUrlParam("connectType");
+        if("server".equals(connectType)){
+            String targetServer = client.getHandshakeData().getSingleUrlParam("targetServer");
+            ProxySocketIoClient proxySocketIoClient = new ProxySocketIoClient(client);
+            log.info("接收到来自{}的连接",targetServer);
+            socketIoConnectionPool.putConnection(targetServer,proxySocketIoClient);
+            log.info("接收到来自{}的协议升级",targetServer);
+            socketIoConnectionPool.addMapping(client.getSessionId(),targetServer);
+            //变更传输协议
+            userMessageService.change2WSProtocol(targetServer);
+            return;
+        }
         if (StringUtils.hasText(id)) {
             userSocketPool.addSocket(id, client);
             log.info("客户端:{},已连接id:{}", client.getSessionId(), id);
@@ -120,6 +137,8 @@ public class ConnectionHandler {
     }
 
 
+
+
     /**
      * 客户端关闭连接时触发
      *
@@ -129,7 +148,7 @@ public class ConnectionHandler {
     public void onDisconnect(SocketIOClient client) {
         //在client缓存中拿到user
         String userId = userSocketPool.getUserId(client.getSessionId().toString());
-
+        String targetName = socketIoConnectionPool.getMapping(client.getSessionId());
         if (!Objects.isNull(userId)){
             activeGroupUser.userOfflineAll(userId);
             ConcurrentMap<String, User> groupMembers = activeGroupUser.getGroupMembers("lobby");
@@ -140,9 +159,15 @@ public class ConnectionHandler {
             IMap<Object, Object> userOnlineMap = hazelcastInstance.getMap("userOnlineMap");
             log.info("result:{}",userOnlineMap.size());
             userOnlineMap.remove(userId);
+            log.info("客户端:" + client.getSessionId() + "断开连接");
+        }
+        if(!Objects.isNull(targetName)){
+            socketIoConnectionPool.closeConnection(targetName);
+            socketIoConnectionPool.delMapping(client.getSessionId());
+            log.info("服务端:" + targetName + "断开连接");
         }
 
-        log.info("客户端:" + client.getSessionId() + "断开连接");
+
     }
 
     //joinFriendSocket 将当前用户加入好友socket

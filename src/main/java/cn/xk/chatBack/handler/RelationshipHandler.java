@@ -62,6 +62,8 @@ public class RelationshipHandler {
         groupMessageService.sendEvent("activeGroupUser", "lobby", groupService.selectActiveGroupUser(userId));
     }
 
+    AckCallback<String> ackCallback;
+
     @OnEvent(value = "chatData")
     public void onEvent(SocketIOClient client, User user) {
         log.info("chatData:{}", user);
@@ -85,12 +87,15 @@ public class RelationshipHandler {
         userData.add(user);
         userData.addAll(userMsgLists);
         map.put("userData", userList);
-        client.sendEvent("chatData", new AckCallback<String>(String.class) {
+
+        ackCallback = new AckCallback<String>(String.class) {
             @Override
             public void onSuccess(String result) {
                 System.out.println("ack from client: " + client.getSessionId() + " data: " + result);
             }
-        }, R.ok(map));
+        };
+        client.sendEvent("chatData",
+        ackCallback, R.ok(map));
     }
 
     @OnEvent(value = "joinGroup")
@@ -208,6 +213,7 @@ public class RelationshipHandler {
 
     @OnEvent(value = "addFriend")
     public void addFriend(SocketIOClient client, @NotNull Map<String, String> requestMap) {
+        ackCallback.onSuccess("123");
         String userId = requestMap.get("userId");
         String friendId = requestMap.get("friendId");
         long createTime = Long.parseLong(String.valueOf(requestMap.get("createTime")));

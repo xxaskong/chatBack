@@ -50,7 +50,7 @@ public class GroupMessageServiceImpl implements GroupMessageService {
      * @return
      */
     @Override
-    public R<?> sendGroupMessage(String groupId, Object groupMessage) {
+    public R<?> sendGroupMessage(String groupId, R<Object> groupMessage) {
         //获取在线列表
         ConcurrentMap<String, User> groupMembers = activeGroupUser.getGroupMembers(groupId);
         for (String userId : groupMembers.keySet()) {

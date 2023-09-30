@@ -21,7 +21,6 @@ import lombok.NoArgsConstructor;
 public class UserMessage extends Message {
 
     @TableId(type = IdType.AUTO)
-    @JsonProperty(value = "_id")
     private int id;
 
     /**

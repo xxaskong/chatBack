@@ -1,8 +1,24 @@
 package cn.xk.chatBack.model;
 
+import cn.xk.chatBack.model.connect.UserSocketPool;
+import cn.xk.chatBack.model.constant.RCode;
+import cn.xk.chatBack.model.constant.TargetType;
+import cn.xk.chatBack.model.message.UserMessage;
+import cn.xk.chatBack.service.UserMessageService;
+import com.corundumstudio.socketio.SocketIOClient;
+import io.netty.util.HashedWheelTimer;
+import io.netty.util.Timeout;
+import io.netty.util.TimerTask;
+import lombok.extern.slf4j.Slf4j;
+
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.DelayQueue;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 重试队列用于消息的超时重发
@@ -11,6 +27,7 @@ import java.util.Map;
  * @Description:
  * @CreateDate: Created in 2023-09-11
  */
+@Slf4j
 public class RetryQueue {
 
     /**
@@ -18,32 +35,47 @@ public class RetryQueue {
      */
     public static final int timeout = 3000;
 
-    public static final int retryCount  = 3000;
+    //重试次数
+    public static final int retryCount  = 3;
 
-    Map<Long, RetryMessage> map = new HashMap<>();
+    UserMessageService userMessageService;
 
-    //加一个定时任务注解
-    public void timeLoop() {
-        //获取当前时间戳
-        long nowTime = System.currentTimeMillis();
-        //遍历set
-        for (RetryMessage retryMessage : map.values()) {
-            if (nowTime - retryMessage.getTimeStamp() > timeout){
-                //执行重发任务
+    private final HashedWheelTimer executorService;
 
-            }else{
-                retryMessage.setTimer(retryMessage.getTimer()+1);
-            }
-            if (retryMessage.getTimer() > retryCount){
-                //发送失败
-                //数据出队列
-                map.remove(retryMessage);
+    ConcurrentMap<Integer, Timeout> timeoutMap;
+
+    ConcurrentMap<Integer, Integer> timeoutFrequencyMap;
+
+    public RetryQueue() {
+        executorService = new HashedWheelTimer();
+        timeoutMap = new ConcurrentHashMap<>();
+        timeoutFrequencyMap = new ConcurrentHashMap<>();
+    }
+
+    public void registerMessage(int messageId){
+        timeoutFrequencyMap.put(messageId,0);
+    }
+
+    public void proxyMessage(int messageId, TimerTask timerTask, Object lock){
+        synchronized (lock) {
+            Integer timeoutFrequency = timeoutFrequencyMap.get(messageId);
+            if (!Objects.isNull(timeoutFrequency) && timeoutFrequency < retryCount) {
+                log.info("添加超时xxask{}",messageId);
+                Timeout timeout = executorService.newTimeout(timerTask, 3, TimeUnit.SECONDS);
+                timeoutMap.put(messageId, timeout);
+                timeoutFrequencyMap.put(messageId, timeoutFrequency + 1);
             }
         }
     }
 
-    public void ackMessage(long id){
-        map.remove(id);
+    public void cancelMessage(Integer messageId, Object lock){
+        synchronized (lock) {
+            timeoutFrequencyMap.put(messageId, retryCount + 1);
+            Timeout timeout = timeoutMap.remove(messageId);
+            if (timeout!= null) {
+                timeout.cancel();
+            }
+        }
     }
 
 

@@ -12,7 +12,7 @@ public interface GroupMessageService {
 
     int insertGroupMessage(GroupMessage groupMessage);
 
-    public R<?> sendGroupMessage(String groupId,Object groupMessage);
+    public R<?> sendGroupMessage(String groupId,R<Object> groupMessage);
 
     public R<?> sendEvent(String name, String groupId, Object o);
 }

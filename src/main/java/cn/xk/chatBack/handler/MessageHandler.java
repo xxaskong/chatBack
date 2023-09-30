@@ -13,12 +13,12 @@ import cn.xk.chatBack.service.GroupService;
 import cn.xk.chatBack.service.UserMessageService;
 import cn.xk.chatBack.service.UserService;
 import cn.xk.chatBack.utils.AliOSSUtils;
-import com.corundumstudio.socketio.AckRequest;
-import com.corundumstudio.socketio.BroadcastOperations;
-import com.corundumstudio.socketio.SocketIOClient;
-import com.corundumstudio.socketio.SocketIOServer;
+import com.corundumstudio.socketio.*;
+import com.corundumstudio.socketio.ack.AckManager;
 import com.corundumstudio.socketio.annotation.OnEvent;
 import com.hazelcast.core.HazelcastInstance;
+import io.netty.util.Timeout;
+import io.netty.util.TimerTask;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.Resource;
@@ -72,14 +72,29 @@ public class MessageHandler {
     private AliOSSUtils aliOSSUtils;
 
     @Autowired
+    AckEntry ackEntry;
+
+    @Autowired
     private HazelcastInstance hazelcastInstance;
+
+    @Autowired
+    private RetryQueue retryQueue;
+
+    @OnEvent("abc")
+    public void test(SocketIOClient client, String s){
+        log.info("test:{}",s);
+    }
+
+
+
+
 
     @OnEvent("friendMessage")
     public void friendMessage(SocketIOClient client, UserMessageVo userMessageVo, final AckRequest ackRequest) throws IOException {
         long nowTime = System.currentTimeMillis();
         userMessageVo.setTime(nowTime);
         User user = client.get("user");
-        R<UserMessage> result = new R<>();
+        R<Object> result = new R<>();
         //判断是不是本用户发送的消息
         log.info("user：{}", user);
         if (!user.getUserId().equals(userMessageVo.getUserId())) {
@@ -95,7 +110,6 @@ public class MessageHandler {
         //todo 好友关系和好友在线用client缓存和redis缓存实现，mysql为兜底策略
         List<String> friendIdList = client.get("friendIdList");
         //判断有没有好友关系,先判断缓存若缓存不存在则继续查数据库两个都不存在则确定不存在好友关系
-        //todo 缓存可靠性保证 缓存一致性
         if (!friendIdList.contains(userMessageVo.getFriendId()) &&
                 (userService.friendExist(userMessageVo.getUserId(), userMessageVo.getFriendId()) > 0)) {
             result.setCode(RCode.FAIL);
@@ -108,22 +122,16 @@ public class MessageHandler {
         //判断消息类型
         if (MessageType.IMG.equals(userMessageVo.getMessageType())) {
             //图片类型
-            //todo 可靠性保证
             ByteBuffer imgContent = userMessageVo.getImgContent();
-            Resource resource = resourceLoader.getResource("classpath:/avatar/");
-            String path = resource.getFile().getAbsolutePath() + "\\";
             String uuid = UUID.randomUUID().toString().replace("-", "");
             String fileName = uuid + "$" + userMessageVo.getWidth() + "$" + userMessageVo.getHeight();
-            FileOutputStream output = new FileOutputStream(new File(path + fileName));
-            FileChannel channel = output.getChannel();
-            while (imgContent.hasRemaining()) {
-                channel.write(imgContent);
-            }
+            String imgUrl = aliOSSUtils.upload(fileName, imgContent);
             //存入图片访问路径
-            userMessage.setContent("/api/avatar/" + fileName);
-            channel.close();
-            output.close();
+            userMessage.setContent(imgUrl);
         }
+
+
+
 
         //消息存库
         int count = userMessageService.insertUserMessage(userMessage);
@@ -138,17 +146,36 @@ public class MessageHandler {
         result.setCode(RCode.OK);
         result.setMsg("");
         result.setData(userMessage);
-        //判断好友是否在线在线则发送
+
+
+        ackEntry.registerAckCallback(userMessage.getId(), new AckCallback<String>(String.class) {
+            @Override
+            public void onSuccess(String localResult) {
+                //给自己发一份表示发送成功
+                client.sendEvent("friendMessage", result);
+                log.info("ackToClient:{}",userMessage.getContent());
+                retryQueue.cancelMessage(userMessage.getId(),userMessage);
+            }
+        });
+
+        TimerTask timerTask = new TimerTask() {
+            @Override
+            public void run(Timeout timeout) throws Exception {
+                log.info("添加超时重传{}",userMessage.getId());
+                userMessageService.sendMessage(userMessage.getFriendId(), TargetType.USER, result);
+                retryQueue.proxyMessage(userMessage.getId(), this,userMessage);
+            }
+        };
         userMessageService.sendMessage(userMessage.getFriendId(), TargetType.USER, result);
-        //给自己也发一份
-        client.sendEvent("friendMessage", result);
+        retryQueue.registerMessage(userMessage.getId());
+        retryQueue.proxyMessage(userMessage.getId(), timerTask , userMessage);
     }
 
     @OnEvent("groupMessage")
     public void groupMessage(SocketIOClient client, GroupMessageVo groupMessageVo) throws IOException {
         long nowTime = System.currentTimeMillis();
         groupMessageVo.setTime(nowTime);
-        R<GroupMessage> result = new R<>();
+        R<Object> result = new R<>();
         //判断用户是否和userId一致
         User user = client.get("user");
         if (Objects.isNull(user) || !groupMessageVo.getUserId().equals(user.getUserId())) {
@@ -177,21 +204,11 @@ public class MessageHandler {
         if (MessageType.IMG.equals(groupMessageVo.getMessageType())) {
             //todo 可靠性保证
             ByteBuffer imgContent = groupMessageVo.getImgContent();
-            //Resource resource = resourceLoader.getResource("classpath:/avatar/");
-            //String path = resource.getFile().getAbsolutePath() + "\\";
             String uuid = UUID.randomUUID().toString().replace("-", "");
             String fileName = uuid + "$" + groupMessageVo.getWidth() + "$" + groupMessageVo.getHeight();
             String imgUrl = aliOSSUtils.upload(fileName, imgContent);
-            //FileOutputStream output = new FileOutputStream(new File(path + fileName));
-            //FileChannel channel = output.getChannel();
-            //while (imgContent.hasRemaining()) {
-                //channel.write(imgContent);
-            //}
             //存入图片访问路径
-            //groupMessage.setContent("/api/avatar/" + fileName);
             groupMessage.setContent(imgUrl);
-            //channel.close();
-            //output.close();
         }
         //消息存库
         int count = groupMessageService.insertGroupMessage(groupMessage);

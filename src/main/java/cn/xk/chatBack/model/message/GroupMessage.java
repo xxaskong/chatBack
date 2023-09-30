@@ -20,7 +20,6 @@ import lombok.NoArgsConstructor;
 public class GroupMessage extends Message {
 
     @TableId(type = IdType.AUTO)
-    @JsonProperty(value = "_id")
     private int id;
 
     /**

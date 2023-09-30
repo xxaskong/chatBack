@@ -5,8 +5,11 @@ import cn.xk.chatBack.model.*;
 import cn.xk.chatBack.model.connect.ActiveGroupUser;
 import cn.xk.chatBack.model.connect.UserSocketPool;
 import cn.xk.chatBack.model.message.Message;
+import cn.xk.chatBack.model.message.RelayMessageRequestVo;
 import cn.xk.chatBack.service.UserMessageService;
+import com.alibaba.fastjson2.JSON;
 import com.corundumstudio.socketio.SocketIOClient;
+import com.corundumstudio.socketio.annotation.OnEvent;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.map.IMap;
 import lombok.extern.slf4j.Slf4j;
@@ -51,12 +54,21 @@ public class MessageController {
      * @return
      */
     @PostMapping("/relayMessage")
-    public R<?> message(HttpServletRequest request, @RequestBody Object message) {
-        String targetId = request.getHeader("targetId");
-        String targetType = request.getHeader("targetType");
-        userMessageService.sendMessage(targetId, targetType, message);
+    public R<?> message(@RequestBody RelayMessageRequestVo relayMessageRequestVo) {
+        String targetId = relayMessageRequestVo.getTargetId();
+        String targetType = relayMessageRequestVo.getTargetType();
+        userMessageService.sendMessage(targetId, targetType, relayMessageRequestVo.getMessage());
         return R.ok();
     }
+
+    @OnEvent("/ws/relayMessage")
+    public void wsRelayMessage(RelayMessageRequestVo relayMessageRequestVo){
+        String targetId = relayMessageRequestVo.getTargetId();
+        String targetType = relayMessageRequestVo.getTargetType();
+        userMessageService.sendMessage(targetId, targetType, relayMessageRequestVo.getMessage());
+    }
+
+
 
     @PostMapping("/relayEvent")
     public R<?> event(HttpServletRequest request, @RequestBody Object o) {
@@ -64,5 +76,16 @@ public class MessageController {
         String userId = request.getHeader("userId");
         boolean result = userMessageService.sendEvent(name, userId, o);
         return result ? R.ok() : R.fail();
+    }
+
+    @PostMapping("/ackMessage")
+    public R<?> ack(HttpServletRequest request, @RequestBody Object message){
+        log.info("接收到转发过来的ack");
+        log.info("{}", com.alibaba.fastjson2.JSON.toJSONString(message));
+        String messageType = request.getHeader("messageType");
+        long btime = System.currentTimeMillis();
+        userMessageService.ackMessage(messageType, message);
+        System.out.println(System.currentTimeMillis()-btime);
+        return R.ok();
     }
 }
